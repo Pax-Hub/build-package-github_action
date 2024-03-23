@@ -1,0 +1,105 @@
+name: 'Build Package GitHub Action'
+
+description: 'Generic cross-platform composite GitHub Action for Building a Package and uploading an Artifact'
+
+inputs: 
+
+  cicd_runner:
+    description: 'The GitHub runner to use. Examples: ubuntu-latest, windows-latest, macos-latest'
+    required: false
+    default: 'ubuntu-latest'
+
+  container_image:
+    description: 'A docker/podman container image to run the build process on. Examples: archlinux:latest, rebornos/rebornos:latest'
+    required: false
+    default: ''
+
+  container_init_command:
+    description: 'A command to run to initialize the container. Examples: "sh /root/init_script.sh", "pacman-key --init"'
+    required: false
+    default: ''
+  
+  
+
+  arguments:
+    description: 'The arguments to specify to the cargo or cross subcommand, as a single string. Example: --workspace'
+    required: false
+    default: ''
+
+  rust_release_channel:
+    description: 'Examples: stable, beta, or nightly'
+    required: false
+    default: 'stable'
+
+  use_cross:
+    description: 'Use Cross for cross-compilation. Examples: true or false'
+    required: false
+    default: 'false'
+
+  compilation_target:
+    description: 'Examples: x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, or aarch64-apple-darwin. The compilation target overrides the values given for software_platform, and cpu_architecture'
+    required: false
+    default: 'x86_64-unknown-linux-gnu'
+
+runs:
+
+  using: "composite"
+
+  steps:
+  
+    - name: 🎟 Checkout Git Repository Step
+      id: repository_checkout_step
+      uses: actions/checkout@v4
+
+    - name: 🔎🧰 Determine Rust Toolchain components Step
+      id: rust_toolchain_components_determination_step
+      shell: bash
+      run: |
+        if [ ${{ inputs.subcommand }} = "fmt" ]; then
+          echo "rust_toolchain_components=cargo,rustfmt" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "clippy" ]; then
+          echo "rust_toolchain_components=cargo,clippy" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "check" ]; then
+          echo "rust_toolchain_components=cargo,rustc,rust-std" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "test" ]; then
+          echo "rust_toolchain_components=cargo,rustc,rust-std" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "doc" ]; then
+          echo "rust_toolchain_components=cargo,rustc,rust-std,rust-docs" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "build" ]; then
+          echo "rust_toolchain_components=cargo,rustc,rust-std" >> "$GITHUB_ENV"
+        elif [ ${{ inputs.subcommand }} = "run" ]; then
+          echo "rust_toolchain_components=cargo,rustc,rust-std" >> "$GITHUB_ENV"
+        else
+          echo "rust_toolchain_components=cargo,rustc,rust-std,rustfmt,rust-docs,clippy,miri" >> "$GITHUB_ENV"
+        fi
+
+    - name: 💿🧰 Install Rust Toolchain Step
+      id: toolchain_install_step
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.rust_release_channel }}
+        targets: ${{ inputs.compilation_target }}          
+        components: ${{ env.rust_toolchain_components }}
+
+    - name: 💿🔄 Install Cross-Compilation Tools Step
+      id: cross_install_step
+      if: ${{ inputs.use_cross == 'true' }}
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cross   
+
+    - name: 🏗️🗂 Setup Cache Step
+      id: cache_setup_step
+      uses: Swatinem/rust-cache@v2
+
+    - name: 🚀📦🖥️ Cargo Command Step
+      id: cargo_command_step
+      if: ${{ inputs.use_cross != 'true' || inputs.subcommand == 'fmt' }}
+      shell: bash
+      run: cargo ${{ inputs.subcommand }} ${{ inputs.arguments }}
+
+    - name: 🚀🔄🖥️ Cross Command Step
+      id: cross_command_step
+      if: ${{ inputs.use_cross == 'true' && inputs.subcommand != 'fmt' }}
+      shell: bash
+      run: cross ${{ inputs.subcommand }} --target ${{ inputs.compilation_target }} ${{ inputs.arguments }}
